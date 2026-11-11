@@ -17,7 +17,8 @@ from urllib.request import Request, urlopen
 REPOSITORY = "adarcook/etl-vnc"
 MAX_JSON_BYTES = 256 * 1024 * 1024
 MAX_REPORT_CHARS = 55000
-INPUT_MARKERS = ("GetDevices", "GetFiberCables", "GetFiberTails", "GetIOFL", "GetNetworks", "GetServices")
+INPUT_MARKERS = ("_GetDevicesV2deployed", "_GetDevicesV7deployed", "_GetFiberCables", "_GetFiberTails", "_GetIOFL", "_GetNetworksV7", "_GetNetworksV13", "_GetServices")
+MAX_FILE_REPORT_CHARS = 4000
 
 
 def describe(value, path="$", depth=0):
@@ -49,7 +50,8 @@ def inspect_archive(path):
                 break
             lines.append(line)
             length += len(line) + 1
-            if not member.isfile() or not any(marker in member.name for marker in INPUT_MARKERS):
+            if (not member.isfile() or member.size <= 1048576
+                    or not any(marker in Path(member.name).name for marker in INPUT_MARKERS)):
                 continue
             if member.size > MAX_JSON_BYTES:
                 lines.append("SKIPPED JSON: exceeds 256 MiB memory guard.")
@@ -57,7 +59,12 @@ def inspect_archive(path):
             try:
                 with archive.extractfile(member) as stream:
                     value = json.load(stream)
+                file_report_length = 0
                 for description in describe(value):
+                    if file_report_length + len(description) > MAX_FILE_REPORT_CHARS:
+                        lines.append("FILE STRUCTURE TRUNCATED: 4000 character per-file limit; continuing to next file.")
+                        break
+                    file_report_length += len(description) + 1
                     if length + len(description) > MAX_REPORT_CHARS:
                         lines.append("REPORT LIMIT REACHED: remaining structure and files not inspected.")
                         return "\n".join(lines)
