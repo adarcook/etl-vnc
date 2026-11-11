@@ -1,0 +1,68 @@
+{
+  "destination": {
+    "dest-node": "CHCGILPM-0100710337-DEG1",
+    "dest-tp": "DEG1-TTP-TXRX"
+  },
+  "link-id": "SMMTILSM-0200041903-DEG1#DEG1-TTP-TX##CHCGILPM-0100710337-DEG1#DEG1-TTP-TXRX",
+  "org-openroadm-common-network:administrative-group": 123,
+  "org-openroadm-common-network:administrative-state": "inService",
+  "org-openroadm-common-network:clfi": "38011/OUC   /CHCGILPM   /SMMTILSM",
+  "org-openroadm-common-network:lifecycle-state": "deployed",
+  "org-openroadm-common-network:link-type": "ROADM-TO-ROADM",
+  "org-openroadm-common-network:operational-state": "inService",
+  "org-openroadm-common-network:opposite-link": "CHCGILPM-0100710337-DEG1#DEG1-TTP-TXRX##SMMTILSM-0200041903-DEG1#DEG1-TTP-RX",
+  "org-openroadm-network-topology:OMS-attributes": {
+    "span": {
+      "auto-spanloss": true,
+      "engineered-spanloss": 3.08,
+      "spanloss-base": 2.8,
+      "spanloss-current": 2.8,
+      "spanloss-last-measured": 2.6
+    }
+  },
+  "source": {
+    "source-node": "SMMTILSM-0200041903-DEG1",
+    "source-tp": "DEG1-TTP-TX"
+  }
+},
+{
+  "node-id": "CRDMCA11-0202270322",
+  "org-openroadm-common-network:lifecycle-state": "deployed",
+  "org-openroadm-common-network:node-type": "XPONDER",
+  "org-openroadm-network:node-capabilities": {
+    "supported-xpdr-list": {
+      "supported-xpdr": [
+        {
+          "supported-operational-modes": {
+            "supported-operational-mode": [
+              {
+                "equipment-available": false,
+                "equipment-capacity": true,
+                "operational-mode-id": "OR-W-100G-SC"
+              }
+            ]
+          },
+          "xpdr-type": "tpdr"
+        },
+        {
+          "supported-operational-modes": {
+            "supported-operational-mode": [
+              {
+                "equipment-available": false,
+                "equipment-capacity": true,
+                "operational-mode-id": "OR-W-100G-SC"
+              }
+            ]
+          },
+          "xpdr-type": "switch"
+        }
+      ]
+    }
+  },
+  "supporting-node": [
+    {
+      "network-ref": "clli-network",
+      "node-ref": "CRDMCA11"
+    }
+  ]
+}

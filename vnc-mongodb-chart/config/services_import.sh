@@ -1,0 +1,1 @@
+mongoimport --db=dap --collection=services --file=Services.json --jsonArray --drop

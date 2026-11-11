@@ -1,0 +1,1 @@
+mongoimport --db=dap --collection=devices --file=DevicesV2deployed.json --jsonArray --drop

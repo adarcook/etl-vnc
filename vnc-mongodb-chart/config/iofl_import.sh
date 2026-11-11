@@ -1,0 +1,1 @@
+mongoimport --db=dap --collection=iofl --file=IOFL.json --jsonArray --drop

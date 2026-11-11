@@ -1,0 +1,1 @@
+mongoimport --db=dap --collection=fiber_cables --file=FiberCables.json --jsonArray --drop

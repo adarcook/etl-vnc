@@ -1,0 +1,76 @@
+{
+  "ietf-network-topology:termination-point": [
+    {
+      "org-openroadm-common-network:eqpt-srg-id": 5,
+      "org-openroadm-common-network:tp-type": "XPONDER-NETWORK",
+      "supporting-termination-point": [
+        {
+          "network-ref": "openroadm-topology",
+          "node-ref": "CHCGILPM-0100710414-XPDR1",
+          "tp-ref": "XPDR1-NETWORK4"
+        }
+      ],
+      "tp-id": "XPDR1-NETWORK4"
+    },
+    {
+      "org-openroadm-common-network:eqpt-srg-id": 5,
+      "org-openroadm-common-network:tp-type": "XPONDER-NETWORK",
+      "supporting-termination-point": [
+        {
+          "network-ref": "openroadm-topology",
+          "node-ref": "CHCGILPM-0100710414-XPDR1",
+          "tp-ref": "XPDR1-NETWORK3"
+        }
+      ],
+      "tp-id": "XPDR1-NETWORK3"
+    },
+    {
+      "org-openroadm-common-network:eqpt-srg-id": 3,
+      "org-openroadm-common-network:tp-type": "XPONDER-NETWORK",
+      "supporting-termination-point": [
+        {
+          "network-ref": "openroadm-topology",
+          "node-ref": "CHCGILPM-0100710414-XPDR1",
+          "tp-ref": "XPDR1-NETWORK2"
+        }
+      ],
+      "tp-id": "XPDR1-NETWORK2"
+    },
+    {
+      "org-openroadm-common-network:eqpt-srg-id": 3,
+      "org-openroadm-common-network:tp-type": "XPONDER-NETWORK",
+      "supporting-termination-point": [
+        {
+          "network-ref": "openroadm-topology",
+          "node-ref": "CHCGILPM-0100710414-XPDR1",
+          "tp-ref": "XPDR1-NETWORK1"
+        }
+      ],
+      "tp-id": "XPDR1-NETWORK1"
+    },
+    {
+      "org-openroadm-common-network:eqpt-srg-id": 6,
+      "org-openroadm-common-network:tp-type": "XPONDER-CLIENT",
+      "supporting-termination-point": [
+        {
+          "network-ref": "openroadm-topology",
+          "node-ref": "CHCGILPM-0100710414-XPDR1",
+          "tp-ref": "XPDR0-CLIENT0"
+        }
+      ],
+      "tp-id": "XPDR0-CLIENT0"
+    }
+  ],
+  "node-id": "CHCGILPM-0100710414-XPDR1",
+  "org-openroadm-common-network:lifecycle-state": "deployed",
+  "org-openroadm-common-network:node-type": "SWITCH",
+  "org-openroadm-otn-network-topology:xpdr-attributes": {
+    "xpdr-number": 1
+  },
+  "supporting-node": [
+    {
+      "network-ref": "openroadm-topology",
+      "node-ref": "CHCGILPM-0100710414-XPDR1"
+    }
+  ]
+}

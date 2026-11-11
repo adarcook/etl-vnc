@@ -1,0 +1,56 @@
+app:
+  version: 1.0.0
+namespace: vnc-mongodb
+spec:
+  nodeSelector: aks-user-38932214-vmss000000
+  minReadySeconds: 0
+  progressDeadlineSeconds: 2147483647
+  replicas: 1
+  revisionHistoryLimit: 0
+  strategy:
+    rollingUpdate:
+      maxSurge: 50%
+      maxUnavailable: 50%
+    type: RollingUpdate
+  pod:
+    containers:
+      volumes:
+        nifi:
+          name: cronjob-pgdump
+          mountPath: /opt/cronjob-pgdump/cronjob-pgdump--current/conf
+      #imageName: apache/nifi:latest
+      #imagePullPolicy: IfNotPresent
+      #ports:
+      #  containerPort: 8080
+      #  name: http
+      #resources:
+     #   memory: "1Gi"
+     #   cpu: 150m
+    restartPolicy: Always
+    serviceAccountName: default
+    imagePullSecrets:
+      name: jfrog-docker-registry-secret
+    
+hpa:
+  maxReplicas: 1
+  minReplicas: 1
+  cpuTargetAverageUtilization: 85
+  memoryTargetAverageUtilization: 85
+
+persistentVolume:
+  spec:
+    azureFile:
+      secretName: storage-secret
+      shareName: pgdumps
+      readOnly: false # Write access is required to allow the application to modify or create files in the Azure File share.
+
+azureStorage:
+  accountName: ""
+  accountKey: ""
+
+storageClass:
+  name: azurefile-sc
+
+KeyVaultName: eososswst3nprdkv
+# Client ID of the cluster's Key Vault CSI identity; the deploy workflow overrides it per cluster
+userAssignedIdentityID: 8e04d1ed-77fe-4000-882e-13e635413329

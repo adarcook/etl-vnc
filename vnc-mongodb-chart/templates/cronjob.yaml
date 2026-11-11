@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ .Release.Name }}
+  annotations:
+    version: {{ .Values.app.version }}
+spec:
+  schedule: "0 2 * * *"  # Every day at 02:00 UTC
+  jobTemplate:
+    spec:
+      backoffLimit: 0  # no retries: a failed run stops until the next schedule
+      template:
+        spec:
+          imagePullSecrets:
+          - name: jfrog-secret
+          containers:
+          - name: mongodb
+            image: artifact.it.att.com:22609/apm0046639-dkr-stage/vnc:{{ .Values.image.tag }}
+            env:
+            - name: VNC_ARCHIVE_SAS
+              valueFrom:
+                secretKeyRef:
+                  name: vnc-secret
+                  key: vnc-archive-sas
+            - name: VNC_CSV_SAS
+              valueFrom:
+                secretKeyRef:
+                  name: vnc-secret
+                  key: vnc-csv-sas
+            - name: URL_CSV
+              value: "https://eosossnprdst.blob.core.windows.net/vnc-procesed"
+            - name: URL_DUMP
+              value: "https://eosossnprdst.blob.core.windows.net/vnc-dropbox/daily-api-get.tar.gz"
+            command:
+            - /bin/bash
+            - -c
+            - |
+                cp -aL /mnt/config/* /opt/vnc/
+                chmod +x /opt/vnc/*.sh
+                cd /opt/vnc
+                ./do-all.sh
+            volumeMounts:
+            - name: config-volume
+              mountPath: /mnt/config
+              readOnly: true
+            - name: secrets-store-inline
+              mountPath: /mnt/secrets
+              readOnly: true
+          restartPolicy: Never
+          volumes:
+          - name: config-volume
+            configMap:
+              name: {{ .Release.Name }}-config
+          - name: secrets-store-inline
+            csi:
+              driver: secrets-store.csi.k8s.io
+              readOnly: true
+              volumeAttributes:
+                secretProviderClass: secretproviderclassvnc
