@@ -1,22 +1,22 @@
-# מיפוי ETL: מקובצי JSON לקובצי CSV
+# ETL Mapping: JSON Input to CSV Output
 
-תאריך: 11.11.2026. מקור: הקוד שנקרא מענף main והדוח המקומי [Issue 2](https://github.com/adarcook/etl-vnc/issues/2).
+Date: November 11, 2026. Based on code read from the `main` branch and the local archive report in [Issue #2](https://github.com/adarcook/etl-vnc/issues/2).
 
-זהו תיאור של ההתנהגות בקוד, לא אישור שהדרישות העסקיות נכונות. לא הורץ ETL על הארכיון ולא נבדקו CSV שנוצרו בפועל. דוח הקלט מציג מבנה חלקי בלבד; קבצי DevicesV7, FiberCables ו־Services הגדולים לא נותחו בתוכו. רשימות העמודות בהמשך נלקחו מפקודות הייצוא, ולא הוסקו משמות הקבצים.
+This document describes observed code behavior; it does not validate the business requirements. The ETL was not run against the archive, and generated CSV files were not inspected. The input report includes only a partial structural inspection: the large DevicesV7, FiberCables, and Services files were not fully analyzed. The CSV column definitions below come from export commands, not from guesses based on filenames.
 
-## איך לקרוא את המסמך
+## How to Read This Document
 
-1. שלב 1: אילו קבצים נכנסים ולאיזה JSON ביניים הם הופכים.
-2. שלב 2: לכל CSV — מאיזה JSON הוא מגיע, איזו ישות הוא מתאר, וכיצד נקבעת שורה בפלט.
-3. שלב 3: כל עמודות ה־CSV בסדר המדויק, עם מקור או חישוב לכל עמודה.
+1. **Stage 1 — Input:** Which files are selected, and which intermediate JSON files they produce.
+2. **Stage 2 — Transformations:** For every CSV, its JSON source, entity meaning, row granularity, filters, and flattening rules.
+3. **Stage 3 — CSV Schemas:** Every output column in its actual order, with its source or derivation rule.
 
-מונחים: ציוד הוא מכשיר; כרטיס הוא רכיב בציוד; פורט הוא נקודת חיבור; מדף הוא מארז לכרטיסים; חריץ הוא מקום לכרטיס; טופולוגיה מתארת חיבורים; שירות מתאר חיבור מסופק והמשאבים או המסלול שלו. הקוד מבדיל בין סוגי ציוד לפי הערכים rdm ו־xpdr. אין צורך להכיר לעומק את הטכנולוגיות כדי לקרוא את כללי המיפוי.
+Terminology: a device is a network equipment unit; a circuit pack is a component inside a device; a port is a connection point; a shelf houses circuit packs; a slot holds a circuit pack; topology describes connectivity; a service describes a provisioned connection and its associated resources or route. The code distinguishes device types using `rdm` and `xpdr`. Familiarity with the underlying optical technologies is not required to follow the transformations.
 
-## שלב 1 — בחירת הקלט וחילוץ JSON ביניים
+## Stage 1 — Input Selection and Intermediate JSON Extraction
 
-הסקריפט הראשי הוא [do-all.sh](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/do-all.sh). בריצה רגילה הארכיון חייב להיות גדול מ־50,000,000 בתים. לאחר חילוץ, find מחפש רק קבצים רגילים בגודל מעל 1 MiB, לפי התבניות הבאות. החיפוש מתבצע בתיקייה הנוכחית ובתתי־תיקיותיה, לא רק ברשימת חברי הארכיון האחרון.
+The entry script is [do-all.sh](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/do-all.sh). During a normal run, the archive must exceed 50,000,000 bytes. After extraction, `find` selects regular files larger than 1 MiB whose names match the patterns below. The search covers the working directory and its subdirectories, **not only members of the latest extracted archive**.
 
-| תבנית בשם הקובץ | מה מחלצים | JSON ביניים | collection ב־dap |
+| Filename pattern | Extracted key | Intermediate JSON | MongoDB collection in `dap` |
 |---|---|---|---|
 | `*_GetDevicesV2deployed*` | `openroadm-devices` | `DevicesV2deployed.json` | `devices` |
 | `*_GetDevicesV7deployed*` | `openroadm-devices` | `DevicesV7deployed.json` | `devices7` |
@@ -25,442 +25,442 @@
 | `*_GetIOFL*` | `inter-office-fiber-link` | `IOFL.json` | `iofl` |
 | `*_GetServices*` | `services` | `Services.json` | `services` |
 
-### פיצול קובצי הרשתות
+### Network File Extraction
 
-כל אחת מהתבניות `*_GetNetworksV7*` ו־`*_GetNetworksV13*` נבדקת באותו אופן. נסמן את הגרסה ב־N (7 או 13).
+The patterns `*_GetNetworksV7*` and `*_GetNetworksV13*` follow the same logic. Let `N` be the version number (7 or 13).
 
-| בחירה מתוך network-list | JSON ביניים (N מוחלף בגרסה) | collection |
+| Selection from `network-list` | Intermediate JSON (`N` is the version) | Collection |
 |---|---|---|
-| הרשת הראשונה עם `network-id = openroadm-network`, מתוכה `node` | `NetworksVN_network.json` | `networks_vN_openroadm_network` |
-| הרשת הראשונה עם `network-id = openroadm-topology`, מתוכה `node` | `NetworksVN_topology.json` | `networks_vN_openroadm_topology` |
-| הרשת הראשונה עם `network-id = otn-topology`, מתוכה `node` | `NetworksVN_otn_topology.json` | `networks_vN_openroadm_otn_topology` |
-| איסוף כל איברי `ietf-network-topology:link` מכל הרשתות | `NetworkvN_ietf_network_topology.json` | `networks_vN_ietf_network_topology` |
+| `node` from the first network with `network-id = openroadm-network` | `NetworksVN_network.json` | `networks_vN_openroadm_network` |
+| `node` from the first network with `network-id = openroadm-topology` | `NetworksVN_topology.json` | `networks_vN_openroadm_topology` |
+| `node` from the first network with `network-id = otn-topology` | `NetworksVN_otn_topology.json` | `networks_vN_openroadm_otn_topology` |
+| All `ietf-network-topology:link` elements across networks | `NetworkvN_ietf_network_topology.json` | `networks_vN_ietf_network_topology` |
 
-לדוגמה: `NetworksV13_network.json` ו־`Networkv13_ietf_network_topology.json`. ההבדל באותיות וב־s הוא כפי שמופיע בקוד. בחירת node לוקחת רק את הרשת הראשונה שתואמת. לעומת זאת חילוץ links אוסף מכל הרשתות, ומדלג על מערכים חסרים. אין במסלול הזה חילוץ נפרד של רשת CLLI.
+For example, `NetworksV13_network.json` and `Networkv13_ietf_network_topology.json`. Differences in capitalization and the presence of `s` reflect the actual code. Node extraction uses the **first matching network only**. Link extraction gathers links from all networks and skips missing arrays. This path does not extract a separate CLLI network.
 
-### מה לא נבחר ומה עלול להידרס
+### Excluded Inputs and Overwrite Risks
 
-- קובצי ציוד planned, הקבצים הכלליים ללא deployed, ציוד V13, GetTempServices, subscriptions ו־actionhandlers אינם נבחרים על ידי תבניות הריצה הנוכחית.
-- לפי הדוח, GetNetworksV7 הוא 44 בתים ולכן אינו עובר את סינון הגודל. GetNetworksV13 כן עובר.
-- אם שני קבצים מתאימים לאותה תבנית, כל אחד כותב מחדש לאותו JSON ביניים באמצעות `>`: האחרון שמעובד מחליף את הקודם. זו אינה פעולת איחוד. בדוח הקיים לא הוכחה התנגשות כזו.
-- קבצים ישנים שנשארו בתיקיית הריצה עלולים להשתתף בחיפוש; ניקוי קובצי הביניים מושבת בקוד שנקרא.
-- הייבוא משתמש ב־`--jsonArray --drop`: מסמכים חדשים מחליפים את collection היעד. שני קובצי הציוד הם קריטיים; כשל בקבצים אחרים נספר והתהליך עשוי להמשיך. אין להסיק מהמשך הריצה שכל הנתונים נטענו.
-- קובצי V7 של רשתות מיובאים אם קיימים, אך ארבעת ייצואי הרשת הפעילים קוראים מ־V13. שמות ה־CSV עדיין מכילים v7.
+- Planned device files, generic device files without `deployed`, V13 devices, `GetTempServices`, subscriptions, and action handlers are not selected by the current run patterns.
+- According to the report, `GetNetworksV7` is 44 bytes and fails the size threshold; `GetNetworksV13` passes it.
+- If several files match the same pattern, each rewrites the **same intermediate JSON** using `>`. The last processed file replaces the earlier content; this is **not a merge**. The available report does not establish that an actual collision occurred.
+- Stale files left in the working directory may be picked up. Cleanup of intermediate files is disabled in the inspected code.
+- Imports use `--jsonArray --drop`, replacing the target collection's documents. Both device inputs are critical; failures for other inputs are counted and execution may continue. Continued execution is **not proof** that every dataset was loaded.
+- V7 network files are imported if available, but the four active network CSV exports use **V13 sources** even though their output filenames contain `v7`.
 
-## שלב 2 — כללי העיבוד לפי JSON ו־CSV
+## Stage 2 — Transformation Rules by JSON Source and CSV Output
 
-### כללים משותפים
+### Shared Rules
 
-- **בחירת שדות:** רק העמודות המוגדרות בפקודת הייצוא נכנסות ל־CSV. שדה שנמצא ב־JSON או אפילו ב־View אינו בהכרח מיוצא.
-- **פירוק מערך:** כל איבר יוצר שורה; שדות ההורה חוזרים. בפירוק נוסף, רמת השורה יורדת שוב. למשל מדף ואז slots פירושו שורה לחריץ במדף.
-- **מערך חסר/ריק:** כשמצוין שימור, נשמרת רשומת ההורה גם ללא איבר. ללא שימור היא אינה מפיקה שורה באותו שלב. מדובר בהתנהגות מערכים; ערך סקלרי לא־ריק עשוי להיחשב איבר יחיד ב־unwind.
-- **FIRST:** בחירת איבר 0 מתוך מערך הערכים שמתקבל מהנתיב. זו בחירה לכל שדה בנפרד, לא מיון לפי sequence-number ולא הבטחה שכל השדות מגיעים מאותו איבר משאב כשיש שדות חסרים.
-- **איחוד RDM:** מצרפים את `devices7` ואת `devices` עם unionWith, ואז בוחרים `info.node-type = rdm`. אין הסרת כפילויות ואין העדפת גרסה. זהו View ביניים, לא קובץ JSON מאוחד.
-- **hash:** השדות בשלב שלפני החישוב מומרים למחרוזות ומחוברים ללא מפריד; null מוחלף במחרוזת ריקה; מופעל `$toHashedIndexKey`. אין הבטחת ייחודיות ואין זה מפתח עסקי יציב. שדות שנכללים ב־hash יכולים להיות רחבים יותר מהעמודות המיוצאות. המרה ל־string אינה מבטיחה תמיכה במערך או אובייקט; אין בקוד טיפול כללי בכשלי המרה כאלה.
-- **סדר:** סדר עמודות ה־CSV קבוע. אין בשלבים שנבדקו sort שמבטיח סדר שורות עסקי.
+- **Field selection:** Only columns explicitly selected by the export command reach the CSV. A field present in the JSON or even in a MongoDB view is not necessarily exported.
+- **Array unwinding:** Each array element becomes a row and parent attributes are repeated. Additional unwinds refine granularity further (e.g., shelf followed by slots produces rows per slot).
+- **Missing or empty arrays:** With preservation enabled, a parent row remains even without an element; without it, that parent contributes no row at that unwind stage. This describes array handling; `$unwind` may treat a non-null scalar as a single element.
+- **FIRST:** Selects element 0 from the array of values returned by a path. It is performed **per field**, not sorted by `sequence-number`; missing fields can mean independently selected values do not all belong to the same resource instance.
+- **RDM union:** `devices7` and `devices` are combined with `$unionWith`, then filtered using `info.node-type = rdm`. There is **no deduplication or version preference**. This is an intermediate MongoDB view, not a merged JSON file.
+- **Hash:** Before hashing, fields are converted to strings, concatenated without a separator, and nulls are replaced with empty strings; then `$toHashedIndexKey` is applied. Uniqueness is not guaranteed, nor is this a stable business key. Hash inputs can include fields beyond those exported. String conversion is not guaranteed to work for arrays/objects; the code has no general fallback for such failures.
+- **Ordering:** CSV column order is fixed. No inspected `sort` guarantees business-significant row order.
 
 ### 2.1 — `devices_base_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** פרטי ציוד RDM; שורה לכל מסמך ציוד שעבר את הסינון.
+**Entity and row granularity:** RDM device attributes; one row per filtered device document.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_base_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_base_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.2 — `devices_base_xpdr.csv`
 
-**JSON מקור:** `DevicesV2deployed.json`
+**Source JSON:** ``DevicesV2deployed.json``
 
-**משמעות הישות והשורה:** פרטי ציוד XPDR מ־V2; שורה לכל מסמך ציוד.
+**Entity and row granularity:** V2 XPDR device attributes; one row per device document.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_base_xpdr_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_base_xpdr_view`.
 
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"xpdr"}`.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Filter: `{"org-openroadm-device.info.node-type":"xpdr"}`.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.3 — `devices7_base_xpdr.csv`
 
-**JSON מקור:** `DevicesV7deployed.json`
+**Source JSON:** ``DevicesV7deployed.json``
 
-**משמעות הישות והשורה:** פרטי ציוד XPDR מ־V7; שורה לכל מסמך ציוד.
+**Entity and row granularity:** V7 XPDR device attributes; one row per device document.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices7_base_xpdr_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices7_base_xpdr_view`.
 
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"xpdr"}`.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Filter: `{"org-openroadm-device.info.node-type":"xpdr"}`.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.4 — `devices_circuit_packs_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** כרטיסים בציוד RDM; שורה לכרטיס, עם פרטי הציוד.
+**Entity and row granularity:** Circuit packs in RDM devices; one row per circuit pack with parent device attributes.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_circuit_packs_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_circuit_packs_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- מפרקים את `org-openroadm-device.circuit-packs` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Unwind `org-openroadm-device.circuit-packs` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.5 — `devices_circuit_pack_xpdr.csv`
 
-**JSON מקור:** `DevicesV2deployed.json`
+**Source JSON:** ``DevicesV2deployed.json``
 
-**משמעות הישות והשורה:** כרטיסים בציוד XPDR מ־V2; שורה לכרטיס.
+**Entity and row granularity:** Circuit packs in V2 XPDR devices; one row per circuit pack.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_circuit_packs_xpdr_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_circuit_packs_xpdr_view`.
 
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"xpdr"}`.
-- מפרקים את `org-openroadm-device.circuit-packs` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Filter: `{"org-openroadm-device.info.node-type":"xpdr"}`.
+- Unwind `org-openroadm-device.circuit-packs` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.6 — `devices7_circuit_pack_xpdr.csv`
 
-**JSON מקור:** `DevicesV7deployed.json`
+**Source JSON:** ``DevicesV7deployed.json``
 
-**משמעות הישות והשורה:** כרטיסים ופורטים בציוד XPDR מ־V7; בפועל שורה לפורט בכרטיס, לא רק לכרטיס.
+**Entity and row granularity:** Circuit packs and ports in V7 XPDR devices; the actual granularity is one row per port within a circuit pack, not one per pack.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices7_circuit_pack_xpdr_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices7_circuit_pack_xpdr_view`.
 
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"xpdr"}`.
-- מפרקים את `org-openroadm-device.circuit-packs` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- מפרקים את `ports` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Filter: `{"org-openroadm-device.info.node-type":"xpdr"}`.
+- Unwind `org-openroadm-device.circuit-packs` into rows; preserve rows for missing/empty arrays.
+- Unwind `ports` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.7 — `devices_circuit_packs_cp_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** חריצים פנימיים בכרטיס RDM; שורה לכל cp-slot.
+**Entity and row granularity:** Nested slots within RDM circuit packs; one row per cp-slot.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_circuit_packs_cp_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_circuit_packs_cp_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- מפרקים את `org-openroadm-device.circuit-packs` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- מפרקים את `org-openroadm-device.circuit-packs.cp-slots` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Unwind `org-openroadm-device.circuit-packs` into rows; preserve rows for missing/empty arrays.
+- Unwind `org-openroadm-device.circuit-packs.cp-slots` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.8 — `devices_interfaces_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** ממשקים בציוד RDM; שורה לממשק.
+**Entity and row granularity:** RDM device interfaces; one row per interface.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_interfaces_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_interfaces_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- מפרקים את `org-openroadm-device.interface` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Unwind `org-openroadm-device.interface` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.9 — `devices_interfaces_xpdr.csv`
 
-**JSON מקור:** `DevicesV7deployed.json`
+**Source JSON:** ``DevicesV7deployed.json``
 
-**משמעות הישות והשורה:** ממשקים בציוד XPDR מ־V7 בלבד; שורה לממשק. אין כאן איחוד עם V2.
+**Entity and row granularity:** V7 XPDR interfaces only; one row per interface. V2 is not unioned here.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_interfaces_xpdr_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_interfaces_xpdr_view`.
 
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"xpdr"}`.
-- מפרקים את `org-openroadm-device.interface` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Filter: `{"org-openroadm-device.info.node-type":"xpdr"}`.
+- Unwind `org-openroadm-device.interface` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.10 — `devices_interfaces_oms_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** תת־קבוצה של ממשקי RDM ששמם מכיל oms-. הסינון הוא על שם, לא על שדה type.
+**Entity and row granularity:** Subset of RDM interfaces whose name contains `oms-`; filtering is by name, not by interface type.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_interfaces_oms_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_interfaces_oms_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- מפרקים את `org-openroadm-device.interface` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- מסננים לפי: `{"name":{"$regex":"oms-"}}`.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Unwind `org-openroadm-device.interface` into rows; do not preserve rows for missing/empty arrays.
+- Filter: `{"name":{"$regex":"oms-"}}`.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.11 — `devices_interfaces_ots_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** תת־קבוצה של ממשקי RDM ששמם מכיל ots-. הסינון הוא על שם, לא על שדה type.
+**Entity and row granularity:** Subset of RDM interfaces whose name contains `ots-`; filtering is by name, not by interface type.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_interfaces_ots_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_interfaces_ots_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- מפרקים את `org-openroadm-device.interface` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- מסננים לפי: `{"name":{"$regex":"ots-"}}`.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Unwind `org-openroadm-device.interface` into rows; do not preserve rows for missing/empty arrays.
+- Filter: `{"name":{"$regex":"ots-"}}`.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.12 — `devices_physical_link_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** קשרים פיזיים המתוארים בתוך מסמך הציוד, עם כרטיס ופורט מקור ויעד; שורה לכל physical-link.
+**Entity and row granularity:** Physical links described inside RDM device documents, including source/destination circuit packs and ports; one row per physical link.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_physical_link_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_physical_link_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- מפרקים את `org-openroadm-device.physical-link` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Unwind `org-openroadm-device.physical-link` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.13 — `devices_port_parents_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** פורטים בכרטיסי RDM והפניות לכרטיס ההורה; שורה לפורט, עם שימור הורה כשאין פורטים. interface-name נלקח מהערך הראשון.
+**Entity and row granularity:** Ports in RDM circuit packs and references to their parent packs; one row per port, preserving parents without ports. `interface-name` uses the first value.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_port_parents_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_port_parents_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- מפרקים את `org-openroadm-device.circuit-packs` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- מפרקים את `ports` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Unwind `org-openroadm-device.circuit-packs` into rows; preserve rows for missing/empty arrays.
+- Unwind `ports` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.14 — `devices_srg_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** קבוצות shared-risk-group והכרטיסים הרשומים בהן; שורה לכרטיס בתוך קבוצה, עם שימור הורים חסרים. אין כאן חישוב עצמאי של סיכון.
+**Entity and row granularity:** Shared-risk groups and the circuit packs assigned to them; one row per pack within a group, preserving missing parents. No independent risk calculation is performed.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_srg_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_srg_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- מפרקים את `shared-risk-group` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- מפרקים את `shared-risk-group.circuit-packs` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Unwind `shared-risk-group` into rows; preserve rows for missing/empty arrays.
+- Unwind `shared-risk-group.circuit-packs` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.15 — `devices_shelf_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** מדפים והחריצים שבתוכם; בפועל שורה לחריץ במדף. נשמרים גם ציוד/מדף ללא מערך פנימי.
+**Entity and row granularity:** RDM shelves and their slots; effectively one row per slot within a shelf, preserving devices/shelves without nested entries.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_shelf_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_shelf_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- מפרקים את `org-openroadm-device.shelves` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- מפרקים את `org-openroadm-device.shelves.slots` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Unwind `org-openroadm-device.shelves` into rows; preserve rows for missing/empty arrays.
+- Unwind `org-openroadm-device.shelves.slots` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.16 — `devices_shelf_xpdr.csv`
 
-**JSON מקור:** `DevicesV2deployed.json`
+**Source JSON:** ``DevicesV2deployed.json``
 
-**משמעות הישות והשורה:** מדפים והחריצים שבתוכם; בפועל שורה לחריץ במדף. נשמרים גם ציוד/מדף ללא מערך פנימי.
+**Entity and row granularity:** V2 XPDR shelves and their slots; effectively one row per slot, preserving devices/shelves without nested entries.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_shelf_xpdr_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_shelf_xpdr_view`.
 
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"xpdr"}`.
-- מפרקים את `org-openroadm-device.shelves` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- מפרקים את `org-openroadm-device.shelves.slots` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Filter: `{"org-openroadm-device.info.node-type":"xpdr"}`.
+- Unwind `org-openroadm-device.shelves` into rows; preserve rows for missing/empty arrays.
+- Unwind `org-openroadm-device.shelves.slots` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.17 — `devices7_shelf_xpdr.csv`
 
-**JSON מקור:** `DevicesV7deployed.json`
+**Source JSON:** ``DevicesV7deployed.json``
 
-**משמעות הישות והשורה:** מדפים והחריצים שבתוכם; בפועל שורה לחריץ במדף. נשמרים גם ציוד/מדף ללא מערך פנימי.
+**Entity and row granularity:** V7 XPDR shelves and their slots; effectively one row per slot, preserving devices/shelves without nested entries.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices7_shelf_xpdr_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices7_shelf_xpdr_view`.
 
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"xpdr"}`.
-- מפרקים את `org-openroadm-device.shelves` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- מפרקים את `org-openroadm-device.shelves.slots` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Filter: `{"org-openroadm-device.info.node-type":"xpdr"}`.
+- Unwind `org-openroadm-device.shelves` into rows; preserve rows for missing/empty arrays.
+- Unwind `org-openroadm-device.shelves.slots` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.18 — `devices_degree_rdm.csv`
 
-**JSON מקור:** `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+**Source JSON:** ``DevicesV2deployed.json + DevicesV7deployed.json (RDM union)``
 
-**משמעות הישות והשורה:** כיווני חיבור (degree) בציוד RDM; שורה לכל connection-port בכיוון, עם שימור הורים חסרים.
+**Entity and row granularity:** RDM degrees and their connection ports; one row per connection port, preserving missing parents.
 
-**קוד:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js), View: `devices_degree_rdm_view`.
+**Implementation:** [devices.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js); view: `devices_degree_rdm_view`.
 
-- מקור הנתונים כבר כולל צירוף V2 ו־V7 וסינון RDM; אין הסרת כפילויות.
-- מסננים לפי: `{"org-openroadm-device.info.node-type":"rdm"}`.
-- מפרקים את `org-openroadm-device.degree` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- מפרקים את `org-openroadm-device.degree.connection-ports` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The source combines V2 and V7 RDM documents without deduplication.
+- Filter: `{"org-openroadm-device.info.node-type":"rdm"}`.
+- Unwind `org-openroadm-device.degree` into rows; preserve rows for missing/empty arrays.
+- Unwind `org-openroadm-device.degree.connection-ports` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.19 — `fiber_cables_base_rdm.csv`
 
-**JSON מקור:** `FiberCables.json`
+**Source JSON:** ``FiberCables.json``
 
-**משמעות הישות והשורה:** כבל וסיביו; שורה לכל fiber-cable-strand. כבל ללא סיבים לא מפיק שורה.
+**Entity and row granularity:** Fiber cables and their strands; one row per `fiber-cable-strand`. A cable without strands produces no rows.
 
-**קוד:** [fiber_cables.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/fiber_cables.js), View: `fiber_cables_base_view`.
+**Implementation:** [fiber_cables.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/fiber_cables.js); view: `fiber_cables_base_view`.
 
-- מפרקים את `fiber-cable-strand` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Unwind `fiber-cable-strand` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.20 — `fiber_tails.csv`
 
-**JSON מקור:** `FiberTails.json`
+**Source JSON:** ``FiberTails.json``
 
-**משמעות הישות והשורה:** סיכום Tail — ישות חיבור עם תיאור לכיוון הלקוח ולכיוון הרשת; שורה למסמך Tail. בוחרים ערך ראשון לכל שדה במסלולים. wiring-record-entry אינו נפרס לטבלה.
+**Entity and row granularity:** A fiber-tail summary with client-facing and network-facing connection details; one row per tail document. The first value is selected independently for each path. `wiring-record-entry` is not expanded into rows.
 
-**קוד:** [fiber_tails.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/fiber_tails.js), View: `fiber_tails_view`.
+**Implementation:** [fiber_tails.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/fiber_tails.js); view: `fiber_tails_view`.
 
-- אין פירוק מערכים או סינון רשומות ב־View; העיבוד הוא בחירת שדות וחישובים.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The view does not unwind arrays or filter records; it selects and derives fields.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.21 — `iofl_client.csv`
 
-**JSON מקור:** `IOFL.json`
+**Source JSON:** ``IOFL.json``
 
-**משמעות הישות והשורה:** קישור בין אתרים, מבט לכיוון הלקוח; שורה למסמך IOFL עם קצוות A/Z. ערכי המשאבים נבחרים בנפרד באמצעות FIRST.
+**Entity and row granularity:** Inter-office fiber link (IOFL), client-side view; one row per IOFL document with A/Z endpoints. Resource fields use independent FIRST selection.
 
-**קוד:** [iofl.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/iofl.js), View: `iofl_client_view`.
+**Implementation:** [iofl.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/iofl.js); view: `iofl_client_view`.
 
-- אין פירוק מערכים או סינון רשומות ב־View; העיבוד הוא בחירת שדות וחישובים.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The view does not unwind arrays or filter records; it selects and derives fields.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.22 — `iofl_network.csv`
 
-**JSON מקור:** `IOFL.json`
+**Source JSON:** ``IOFL.json``
 
-**משמעות הישות והשורה:** אותו קישור בין אתרים, מבט לכיוון הרשת; שורה למסמך IOFL עם קצוות A/Z. אין join ל־FiberTails: קוראים את ה־tails המקוננים במסמך IOFL עצמו.
+**Entity and row granularity:** The same inter-office link, network-side view; one row per IOFL document with A/Z endpoints. No join to `FiberTails` is performed: nested tails from the IOFL document are used.
 
-**קוד:** [iofl.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/iofl.js), View: `iofl_network_view`.
+**Implementation:** [iofl.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/iofl.js); view: `iofl_network_view`.
 
-- אין פירוק מערכים או סינון רשומות ב־View; העיבוד הוא בחירת שדות וחישובים.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The view does not unwind arrays or filter records; it selects and derives fields.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.23 — `networks_v7_openroadm_network.csv`
 
-**JSON מקור:** `NetworksV13_network.json`
+**Source JSON:** ``NetworksV13_network.json``
 
-**משמעות הישות והשורה:** צומת ויכולות XPDR נתמכות; שורה לכל supported-xpdr עם שימור צומת חסר מערך. הפניות supporting-node וערכי operational-mode נבחרים באמצעות FIRST.
+**Entity and row granularity:** Network nodes and supported XPDR capabilities; one row per `supported-xpdr`, preserving nodes without the array. `supporting-node` references and operational modes use FIRST.
 
-**קוד:** [networks_v7.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/networks_v7.js), View: `networks_v13_openroadm_network_view`.
+**Implementation:** [networks_v7.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/networks_v7.js); view: `networks_v13_openroadm_network_view`.
 
-- מפרקים את `org-openroadm-network:node-capabilities.supported-xpdr-list.supported-xpdr` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Unwind `org-openroadm-network:node-capabilities.supported-xpdr-list.supported-xpdr` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.24 — `networks_v7_openroadm_topology.csv`
 
-**JSON מקור:** `NetworksV13_topology.json`
+**Source JSON:** ``NetworksV13_topology.json``
 
-**משמעות הישות והשורה:** נקודות קצה בצמתים (termination points); שורה לנקודת קצה, עם שימור צומת חסר מערך. supporting-node נבחר ראשון.
+**Entity and row granularity:** Node termination points; one row per termination point, preserving nodes without the array. `supporting-node` uses FIRST.
 
-**קוד:** [networks_v7.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/networks_v7.js), View: `networks_v13_openroadm_topology_view`.
+**Implementation:** [networks_v7.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/networks_v7.js); view: `networks_v13_openroadm_topology_view`.
 
-- מפרקים את `ietf-network-topology:termination-point` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Unwind `ietf-network-topology:termination-point` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.25 — `networks_v7_openroadm_otn_topology.csv`
 
-**JSON מקור:** `NetworksV13_otn_topology.json`
+**Source JSON:** ``NetworksV13_otn_topology.json``
 
-**משמעות הישות והשורה:** נקודות קצה בצמתי רשת otn-topology; שורה לנקודת קצה עם שימור. קיימת אי־התאמת עמודות ייצוא, ראו בהמשך.
+**Entity and row granularity:** Termination points in `otn-topology` nodes; one row per termination point, preserving missing arrays. The export column mismatch is documented below.
 
-**קוד:** [networks_v7.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/networks_v7.js), View: `networks_v13_openroadm_otn_topology_view`.
+**Implementation:** [networks_v7.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/networks_v7.js); view: `networks_v13_openroadm_otn_topology_view`.
 
-- מפרקים את `ietf-network-topology:termination-point` לשורות; משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Unwind `ietf-network-topology:termination-point` into rows; preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.26 — `networks_v7_ietf_network_topology.csv`
 
-**JSON מקור:** `Networkv13_ietf_network_topology.json`
+**Source JSON:** ``Networkv13_ietf_network_topology.json``
 
-**משמעות הישות והשורה:** קישור בין צומת/נקודת קצה מקור לצומת/נקודת קצה יעד; שורה לכל link שחולץ. אין סינון סטטוס ב־View.
+**Entity and row granularity:** Connectivity from a source node/termination point to a destination node/termination point; one row per extracted link. No status filter is applied in the view.
 
-**קוד:** [networks_v7.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/networks_v7.js), View: `networks_v13_ietf_network_topology_view`.
+**Implementation:** [networks_v7.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/networks_v7.js); view: `networks_v13_ietf_network_topology_view`.
 
-- אין פירוק מערכים או סינון רשומות ב־View; העיבוד הוא בחירת שדות וחישובים.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The view does not unwind arrays or filter records; it selects and derives fields.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.27 — `services_base.csv`
 
-**JSON מקור:** `Services.json`
+**Source JSON:** ``Services.json``
 
-**משמעות הישות והשורה:** פרטי שירות וקצוות A/Z; שורה לשירות. פרטי פורטים בכיווני rx/tx נבחרים באמצעות FIRST. אין סינון deployed ב־View זה.
+**Entity and row granularity:** Service attributes and A/Z endpoints; one row per service. RX/TX port attributes use FIRST. This view does not filter for `deployed` services.
 
-**קוד:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js), View: `services_base_view`.
+**Implementation:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js); view: `services_base_view`.
 
-- אין פירוק מערכים או סינון רשומות ב־View; העיבוד הוא בחירת שדות וחישובים.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- The view does not unwind arrays or filter records; it selects and derives fields.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.28 — `services_a_2_z_topology.csv`
 
-**JSON מקור:** `Services.json`
+**Source JSON:** ``Services.json``
 
-**משמעות הישות והשורה:** שלבי מסלול השירות מ־A ל־Z; שורה לכל איבר topology.aToZ. אין סינון deployed.
+**Entity and row granularity:** Service path steps from A to Z; one row per `topology.aToZ` element. No `deployed` filter.
 
-**קוד:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js), View: `services_a_2_z_topology_view`.
+**Implementation:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js); view: `services_a_2_z_topology_view`.
 
-- מפרקים את `topology.aToZ` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Unwind `topology.aToZ` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.29 — `services_z_2_a_topology.csv`
 
-**JSON מקור:** `Services.json`
+**Source JSON:** ``Services.json``
 
-**משמעות הישות והשורה:** שלבי מסלול השירות מ־Z ל־A; שורה לכל איבר topology.zToA. אין סינון deployed.
+**Entity and row granularity:** Service path steps from Z to A; one row per `topology.zToA` element. No `deployed` filter.
 
-**קוד:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js), View: `services_z_2_a_topology_view`.
+**Implementation:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js); view: `services_z_2_a_topology_view`.
 
-- מפרקים את `topology.zToA` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Unwind `topology.zToA` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.30 — `services_a_2_z_network_topology.csv`
 
-**JSON מקור:** `Services.json`
+**Source JSON:** ``Services.json``
 
-**משמעות הישות והשורה:** משאבי רשת במסלול A→Z; רק שירותים deployed, שורה לכל איבר network-topology.a-to-z.
+**Entity and row granularity:** Network resources along the A-to-Z service path; deployed services only, one row per `network-topology.a-to-z` element.
 
-**קוד:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js), View: `services_a_2_z_network_topology_view`.
+**Implementation:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js); view: `services_a_2_z_network_topology_view`.
 
-- מסננים לפי: `{"lifecycle-state":"deployed"}`.
-- מפרקים את `network-topology.a-to-z` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Filter: `{"lifecycle-state":"deployed"}`.
+- Unwind `network-topology.a-to-z` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.31 — `services_z_2_a_network_topology.csv`
 
-**JSON מקור:** `Services.json`
+**Source JSON:** ``Services.json``
 
-**משמעות הישות והשורה:** משאבי רשת במסלול Z→A; רק שירותים deployed, שורה לכל איבר network-topology.z-to-a.
+**Entity and row granularity:** Network resources along the Z-to-A service path; deployed services only, one row per `network-topology.z-to-a` element.
 
-**קוד:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js), View: `services_z_2_a_network_topology_view`.
+**Implementation:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js); view: `services_z_2_a_network_topology_view`.
 
-- מסננים לפי: `{"lifecycle-state":"deployed"}`.
-- מפרקים את `network-topology.z-to-a` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Filter: `{"lifecycle-state":"deployed"}`.
+- Unwind `network-topology.z-to-a` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
 ### 2.32 — `services_otn.csv`
 
-**JSON מקור:** `Services.json`
+**Source JSON:** ``Services.json``
 
-**משמעות הישות והשורה:** יחס בין שירות לשירות תומך; רק deployed, שורה לכל supporting-service-name. אין סינון service-layer נוסף בקוד למרות שם הקובץ.
+**Entity and row granularity:** Relationship between a deployed service and a supporting service; one row per `supporting-service-name`. Despite the CSV filename, the code does not apply an additional service-layer filter.
 
-**קוד:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js), View: `services_otn_view`.
+**Implementation:** [services.js](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js); view: `services_otn_view`.
 
-- מסננים לפי: `{"lifecycle-state":"deployed"}`.
-- מפרקים את `supporting-service-name` לשורות; לא משמרים רשומה עם מערך חסר/ריק.
-- בוחרים/משנים שמות שדות ומוסיפים hash לפי הכלל המשותף. רשימת העמודות ומקורותיהן בשלב 3.
+- Filter: `{"lifecycle-state":"deployed"}`.
+- Unwind `supporting-service-name` into rows; do not preserve rows for missing/empty arrays.
+- Select/rename fields and compute the hash as described in the shared rules; see Stage 3 for exact output columns and sources.
 
-## שלב 3 — מבנה כל CSV ומקורות העמודות
+## Stage 3 — Exact CSV Column Schemas and Field Sources
 
-כל קובץ נכתב לתיקיית `out`. המספר בעמודה הראשונה הוא סדר העמודה ב־CSV. הנתיבים בטבלאות הם יחסיים למסמך שיובא ל־collection, לאחר חילוץ המערך בשלב 1. פירוקי המערכים הם אלה המפורטים בשלב 2; נתיב מקונן לאחר פירוק מתייחס לאיבר הנוכחי. FIRST מציין את בחירת איבר 0. אין כאן הנחה של JOIN בין קבצים.
+Each output file is written to the `out` directory. The first table column specifies CSV column order. Field paths are relative to documents imported into MongoDB collections after Stage 1 extraction. Array unwinding is documented in Stage 2; a nested path after an unwind refers to the current array element. FIRST selects element 0. No joins between files are assumed.
 
-המיפוי עוקב גם אחרי שמות ביניים בתוך רצף ה־project. שדה שנעלם במהלך ההקרנות מסומן כחסר; אין תיקון אוטומטי לשגיאות כתיב. hash מסומן בנפרד ואינו מוצג כמזהה שהגיע מהמקור.
+The mapping also traces intermediate names throughout `$project` stages. Fields lost during projections are explicitly marked missing; typos in source code are not silently corrected. Computed hashes are distinguished from identifiers supplied by the input.
 
 ### 3.1 — `devices_base_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `current-datetime` | org-openroadm-device.info.current-datetime |
@@ -473,13 +473,13 @@ JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
 | 9 | `softwareVersion` | org-openroadm-device.info.softwareVersion |
 | 10 | `latitude` | org-openroadm-device.info.geoLocation.latitude |
 | 11 | `longitude` | org-openroadm-device.info.geoLocation.longitude |
-| 12 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 12 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.2 — `devices_base_xpdr.csv`
 
 JSON: `DevicesV2deployed.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `current-datetime` | org-openroadm-device.info.current-datetime |
@@ -492,13 +492,13 @@ JSON: `DevicesV2deployed.json`
 | 9 | `node-number` | org-openroadm-device.info.node-number |
 | 10 | `serial-id` | org-openroadm-device.info.serial-id |
 | 11 | `softwareVersion` | org-openroadm-device.info.softwareVersion |
-| 12 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 12 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.3 — `devices7_base_xpdr.csv`
 
 JSON: `DevicesV7deployed.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `current-datetime` | org-openroadm-device.info.current-datetime |
@@ -512,13 +512,13 @@ JSON: `DevicesV7deployed.json`
 | 10 | `serial-id` | org-openroadm-device.info.serial-id |
 | 11 | `software-build` | org-openroadm-device.info.software-build |
 | 12 | `softwareVersion` | org-openroadm-device.info.softwareVersion |
-| 13 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 13 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.4 — `devices_circuit_packs_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `template` | org-openroadm-device.info.template |
@@ -543,13 +543,13 @@ JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
 | 21 | `administrative-state` | org-openroadm-device.circuit-packs.administrative-state |
 | 22 | `equipment-state` | org-openroadm-device.circuit-packs.equipment-state |
 | 23 | `operational-state` | org-openroadm-device.circuit-packs.operational-state |
-| 24 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 24 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.5 — `devices_circuit_pack_xpdr.csv`
 
 JSON: `DevicesV2deployed.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `circuit-pack-category` | org-openroadm-device.circuit-packs.circuit-pack-category.type |
@@ -567,13 +567,13 @@ JSON: `DevicesV2deployed.json`
 | 14 | `software-load-version` | org-openroadm-device.circuit-packs.software-load-version |
 | 15 | `vendor` | org-openroadm-device.circuit-packs.vendor |
 | 16 | `type` | org-openroadm-device.circuit-packs.type |
-| 17 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 17 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.6 — `devices7_circuit_pack_xpdr.csv`
 
 JSON: `DevicesV7deployed.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `template` | org-openroadm-device.info.template |
@@ -586,7 +586,7 @@ JSON: `DevicesV7deployed.json`
 | 9 | `model` | org-openroadm-device.circuit-packs.model |
 | 10 | `serial-id` | org-openroadm-device.circuit-packs.serial-id |
 | 11 | `product-code` | org-openroadm-device.circuit-packs.product-code |
-| 12 | `shelf` | [חסר ב־View הסופי] |
+| 12 | `shelf` | [missing from final view] |
 | 13 | `slot` | org-openroadm-device.circuit-packs.slot |
 | 14 | `subSlot` | org-openroadm-device.circuit-packs.subSlot |
 | 15 | `vendor` | org-openroadm-device.circuit-packs.vendor |
@@ -594,30 +594,30 @@ JSON: `DevicesV7deployed.json`
 | 17 | `port-direction` | org-openroadm-device.circuit-packs.ports.port-direction |
 | 18 | `port-name` | org-openroadm-device.circuit-packs.ports.port-name |
 | 19 | `port-type` | org-openroadm-device.circuit-packs.ports.port-type |
-| 20 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 20 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.7 — `devices_circuit_packs_cp_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `circuit-pack-category` | org-openroadm-device.circuit-packs.circuit-pack-category.type |
 | 3 | `circuit-pack-name` | org-openroadm-device.circuit-packs.circuit-pack-name |
-| 4 | `shelf` | [חסר ב־View הסופי] |
+| 4 | `shelf` | [missing from final view] |
 | 5 | `slot` | org-openroadm-device.circuit-packs.slot |
 | 6 | `subSlot` | org-openroadm-device.circuit-packs.subSlot |
 | 7 | `cp-slots-name` | org-openroadm-device.circuit-packs.cp-slots.slot-name |
 | 8 | `cp-slots-type` | org-openroadm-device.circuit-packs.cp-slots.slot-type |
 | 9 | `provisioned-circuit-pack` | org-openroadm-device.circuit-packs.cp-slots.provisioned-circuit-pack |
-| 10 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 10 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.8 — `devices_interfaces_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `name` | org-openroadm-device.interface.name |
@@ -640,13 +640,13 @@ JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
 | 19 | `ethernet-speed` | org-openroadm-device.interface.ethernet.speed |
 | 20 | `ethernet-fec` | org-openroadm-device.interface.ethernet.fec |
 | 21 | `ethernet-mtu` | org-openroadm-device.interface.ethernet.mtu |
-| 22 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 22 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.9 — `devices_interfaces_xpdr.csv`
 
 JSON: `DevicesV7deployed.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `name` | org-openroadm-device.interface.name |
@@ -669,13 +669,13 @@ JSON: `DevicesV7deployed.json`
 | 19 | `ethernet-speed` | org-openroadm-device.interface.ethernet.speed |
 | 20 | `ethernet-fec` | org-openroadm-device.interface.ethernet.fec |
 | 21 | `ethernet-mtu` | org-openroadm-device.interface.ethernet.mtu |
-| 22 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 22 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.10 — `devices_interfaces_oms_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `name` | org-openroadm-device.interface.name |
@@ -683,13 +683,13 @@ JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
 | 4 | `supporting-interface` | org-openroadm-device.interface.supporting-interface |
 | 5 | `supporting-port` | org-openroadm-device.interface.supporting-port |
 | 6 | `type` | org-openroadm-device.interface.type |
-| 7 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 7 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.11 — `devices_interfaces_ots_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `name` | org-openroadm-device.interface.name |
@@ -697,13 +697,13 @@ JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
 | 4 | `supporting-interface` | org-openroadm-device.interface.supporting-interface |
 | 5 | `supporting-port` | org-openroadm-device.interface.supporting-port |
 | 6 | `type` | org-openroadm-device.interface.type |
-| 7 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 7 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.12 — `devices_physical_link_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `physical-link-name` | org-openroadm-device.physical-link.physical-link-name |
@@ -711,13 +711,13 @@ JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
 | 4 | `s-port-name` | org-openroadm-device.physical-link.source.port-name |
 | 5 | `d-circuit-pack-name` | org-openroadm-device.physical-link.destination.circuit-pack-name |
 | 6 | `d-port-name` | org-openroadm-device.physical-link.destination.port-name |
-| 7 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 7 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.13 — `devices_port_parents_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `template` | org-openroadm-device.info.template |
@@ -740,13 +740,13 @@ JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
 | 19 | `port-name` | org-openroadm-device.circuit-packs.ports.port-name |
 | 20 | `port-qual` | org-openroadm-device.circuit-packs.ports.port-qual |
 | 21 | `port-type` | org-openroadm-device.circuit-packs.ports.port-type |
-| 22 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 22 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.14 — `devices_srg_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node_id` | org-openroadm-device.info.node-id |
 | 2 | `openroadm_version` | org-openroadm-device.info.openroadm-version |
@@ -762,13 +762,13 @@ JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
 | 12 | `mc_capabilities_min_slots` | org-openroadm-device.shared-risk-group.mc-capabilities.min-slots |
 | 13 | `mc_capability_profile_name` | FIRST(org-openroadm-device.shared-risk-group.mc-capability-profile-mc_capability_profile_name) |
 | 14 | `lifecycle_state` | org-openroadm-device.shared-risk-group.lifecycle-state |
-| 15 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 15 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.15 — `devices_shelf_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `administrative-state` | org-openroadm-device.shelves.administrative-state |
@@ -784,13 +784,13 @@ JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
 | 12 | `provisioned-circuit-pack` | org-openroadm-device.shelves.slots.provisioned-circuit-pack |
 | 13 | `slot-name` | org-openroadm-device.shelves.slots.slot-name |
 | 14 | `slot-status` | org-openroadm-device.shelves.slots.slot-status |
-| 15 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 15 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.16 — `devices_shelf_xpdr.csv`
 
 JSON: `DevicesV2deployed.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `administrative-state` | org-openroadm-device.shelves.administrative-state |
@@ -807,13 +807,13 @@ JSON: `DevicesV2deployed.json`
 | 13 | `label` | org-openroadm-device.shelves.slots.label |
 | 14 | `slot-name` | org-openroadm-device.shelves.slots.slot-name |
 | 15 | `slot-status` | org-openroadm-device.shelves.slots.slot-status |
-| 16 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 16 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.17 — `devices7_shelf_xpdr.csv`
 
 JSON: `DevicesV7deployed.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `administrative-state` | org-openroadm-device.shelves.administrative-state |
@@ -830,13 +830,13 @@ JSON: `DevicesV7deployed.json`
 | 13 | `label` | org-openroadm-device.shelves.slots.label |
 | 14 | `slot-name` | org-openroadm-device.shelves.slots.slot-name |
 | 15 | `slot-status` | org-openroadm-device.shelves.slots.slot-status |
-| 16 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 16 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.18 — `devices_degree_rdm.csv`
 
-JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
+JSON: `DevicesV2deployed.json + DevicesV7deployed.json (RDM union)`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | org-openroadm-device.info.node-id |
 | 2 | `degree-number` | org-openroadm-device.degree.degree-number |
@@ -850,13 +850,13 @@ JSON: `DevicesV2deployed.json + DevicesV7deployed.json (איחוד RDM)`
 | 10 | `otdr-port-circuit-pack-name` | org-openroadm-device.degree.otdr-port.circuit-pack-name |
 | 11 | `otdr-port-port-name` | org-openroadm-device.degree.otdr-port.port-name |
 | 12 | `lifecycle-state` | org-openroadm-device.degree.lifecycle-state |
-| 13 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 13 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.19 — `fiber_cables_base_rdm.csv`
 
 JSON: `FiberCables.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `name` | name |
 | 2 | `tail-clfi` | fiber-cable-strand.tail-clfi |
@@ -871,13 +871,13 @@ JSON: `FiberCables.json`
 | 11 | `d-rack` | destination.rack |
 | 12 | `d-shelf` | fiber-cable-strand.destination.shelf |
 | 13 | `d-port` | fiber-cable-strand.destination.port |
-| 14 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 14 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.20 — `fiber_tails.csv`
 
 JSON: `FiberTails.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `clfi` | clfi |
 | 2 | `lifecycle-state` | lifecycle-state |
@@ -905,13 +905,13 @@ JSON: `FiberTails.json`
 | 24 | `towards-network-svc-end-port-name` | FIRST(topology-towards-network.tail-resource-entry.resource.svc-end-port-name) |
 | 25 | `towards-network-svc-end-port-rack` | FIRST(topology-towards-network.tail-resource-entry.resource.svc-end-port-rack) |
 | 26 | `towards-network-svc-end-port-shelf` | FIRST(topology-towards-network.tail-resource-entry.resource.svc-end-port-shelf) |
-| 27 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 27 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.21 — `iofl_client.csv`
 
 JSON: `IOFL.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `clfi` | clfi |
 | 2 | `a-clli` | info.a-clli |
@@ -929,13 +929,13 @@ JSON: `IOFL.json`
 | 14 | `z-roadm-circuit-pack-name` | FIRST(iof-tails.z-tail.topology-towards-client.tail-resource-entry.resource.roadm-circuit-pack-name) |
 | 15 | `z-roadm-name` | FIRST(iof-tails.z-tail.topology-towards-client.tail-resource-entry.resource.roadm-name) |
 | 16 | `z-roadm-port-name` | FIRST(iof-tails.z-tail.topology-towards-client.tail-resource-entry.resource.roadm-port-name) |
-| 17 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 17 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.22 — `iofl_network.csv`
 
 JSON: `IOFL.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `clfi` | clfi |
 | 2 | `a-clli` | info.a-clli |
@@ -953,13 +953,13 @@ JSON: `IOFL.json`
 | 14 | `z-roadm-circuit-pack-name` | FIRST(iof-tails.z-tail.topology-towards-network.tail-resource-entry.resource.roadm-circuit-pack-name) |
 | 15 | `z-roadm-name` | FIRST(iof-tails.z-tail.topology-towards-network.tail-resource-entry.resource.roadm-name) |
 | 16 | `z-roadm-port-name` | FIRST(iof-tails.z-tail.topology-towards-network.tail-resource-entry.resource.roadm-port-name) |
-| 17 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 17 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.23 — `networks_v7_openroadm_network.csv`
 
 JSON: `NetworksV13_network.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | node-id |
 | 2 | `lifecycle-state` | org-openroadm-common-network:lifecycle-state |
@@ -969,13 +969,13 @@ JSON: `NetworksV13_network.json`
 | 6 | `equipment-available` | FIRST(org-openroadm-network:node-capabilities.supported-xpdr-list.supported-xpdr.supported-operational-modes.supported-operational-mode.equipment-available) |
 | 7 | `equipment-capacity` | FIRST(org-openroadm-network:node-capabilities.supported-xpdr-list.supported-xpdr.supported-operational-modes.supported-operational-mode.equipment-capacity) |
 | 8 | `operational-mode-id` | FIRST(org-openroadm-network:node-capabilities.supported-xpdr-list.supported-xpdr.supported-operational-modes.supported-operational-mode.operational-mode-id) |
-| 9 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 9 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.24 — `networks_v7_openroadm_topology.csv`
 
 JSON: `NetworksV13_topology.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | node-id |
 | 2 | `tp-type` | ietf-network-topology:termination-point.org-openroadm-common-network:tp-type |
@@ -985,27 +985,27 @@ JSON: `NetworksV13_topology.json`
 | 6 | `srg-number` | org-openroadm-network-topology:srg-attributes.srg-number |
 | 7 | `supporting-node-network-ref` | FIRST(supporting-node.network-ref) |
 | 8 | `supporting-node-ref` | FIRST(supporting-node.node-ref) |
-| 9 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 9 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.25 — `networks_v7_openroadm_otn_topology.csv`
 
 JSON: `NetworksV13_otn_topology.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `node-id` | node-id |
 | 2 | `node-type` | org-openroadm-common-network:node-type |
-| 3 | `degree-number` | [חסר ב־View הסופי] |
+| 3 | `degree-number` | [missing from final view] |
 | 4 | `tp-type` | ietf-network-topology:termination-point.org-openroadm-common-network:tp-type |
 | 5 | `tp-id` | ietf-network-topology:termination-point.tp-id |
-| 6 | `node-ref` | [חסר ב־View הסופי] |
-| 7 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 6 | `node-ref` | [missing from final view] |
+| 7 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.26 — `networks_v7_ietf_network_topology.csv`
 
 JSON: `Networkv13_ietf_network_topology.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `link-id` | link-id |
 | 2 | `source-node` | source.source-node |
@@ -1016,13 +1016,13 @@ JSON: `Networkv13_ietf_network_topology.json`
 | 7 | `clfi` | org-openroadm-common-network:clfi |
 | 8 | `lifecycle-state` | org-openroadm-common-network:lifecycle-state |
 | 9 | `link-type` | org-openroadm-common-network:link-type |
-| 10 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 10 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.27 — `services_base.csv`
 
 JSON: `Services.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `common-id` | common-id |
 | 2 | `service-name` | service-name |
@@ -1061,13 +1061,13 @@ JSON: `Services.json`
 | 35 | `z-end-tx-direction-port-rack` | FIRST(service-z-end.tx-direction.port.port-rack) |
 | 36 | `z-end-tx-direction-port-shelf` | FIRST(service-z-end.tx-direction.port.port-shelf) |
 | 37 | `z-end-tx-direction-port-type` | FIRST(service-z-end.tx-direction.port.port-type) |
-| 38 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 38 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.28 — `services_a_2_z_topology.csv`
 
 JSON: `Services.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `common_id` | common-id |
 | 2 | `service_name` | service-name |
@@ -1076,9 +1076,9 @@ JSON: `Services.json`
 | 5 | `resourceType` | topology.aToZ.resourceType.type |
 | 6 | `device` | topology.aToZ.device.node-id |
 | 7 | `interface_name` | topology.aToZ.resource.interface-name |
-| 8 | `trib_slots` | חישוב ביניים: trib_slots |
-| 9 | `opucn_trib_slots` | חישוב ביניים: opucn_trib_slots |
-| 10 | `circuit_pack_name` | [חסר ב־View הסופי] |
+| 8 | `trib_slots` | Intermediate calculation: trib_slots |
+| 9 | `opucn_trib_slots` | Intermediate calculation: opucn_trib_slots |
+| 10 | `circuit_pack_name` | [missing from final view] |
 | 11 | `port_name` | topology.aToZ.resource.port.port-name |
 | 12 | `resource_service_name` | topology.aToZ.resource.service-name |
 | 13 | `frequency` | topology.aToZ.resource.nmc-ctp.frequency |
@@ -1088,13 +1088,13 @@ JSON: `Services.json`
 | 17 | `odu_rate` | topology.aToZ.resource.odu.rate |
 | 18 | `oducn_n_rate` | topology.aToZ.resource.odu.oducn-n-rate |
 | 19 | `trib_port_number` | topology.aToZ.resource.odu.parent-odu-allocation.trib-port-number |
-| 20 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 20 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.29 — `services_z_2_a_topology.csv`
 
 JSON: `Services.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `common_id` | common-id |
 | 2 | `service_name` | service-name |
@@ -1103,9 +1103,9 @@ JSON: `Services.json`
 | 5 | `resourceType` | topology.zToA.resourceType.type |
 | 6 | `device` | topology.zToA.device.node-id |
 | 7 | `interface_name` | topology.zToA.resource.interface-name |
-| 8 | `trib_slots` | חישוב ביניים: trib_slots |
-| 9 | `opucn_trib_slots` | חישוב ביניים: opucn_trib_slots |
-| 10 | `circuit_pack_name` | [חסר ב־View הסופי] |
+| 8 | `trib_slots` | Intermediate calculation: trib_slots |
+| 9 | `opucn_trib_slots` | Intermediate calculation: opucn_trib_slots |
+| 10 | `circuit_pack_name` | [missing from final view] |
 | 11 | `port_name` | topology.zToA.resource.port.port-name |
 | 12 | `resource_service_name` | topology.zToA.resource.service-name |
 | 13 | `frequency` | topology.zToA.resource.nmc-ctp.frequency |
@@ -1115,13 +1115,13 @@ JSON: `Services.json`
 | 17 | `odu_rate` | topology.zToA.resource.odu.rate |
 | 18 | `oducn_n_rate` | topology.zToA.resource.odu.oducn-n-rate |
 | 19 | `trib_port_number` | topology.zToA.resource.odu.parent-odu-allocation.trib-port-number |
-| 20 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 20 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.30 — `services_a_2_z_network_topology.csv`
 
 JSON: `Services.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `common-id` | common-id |
 | 2 | `service-name` | service-name |
@@ -1133,13 +1133,13 @@ JSON: `Services.json`
 | 8 | `a-z-tp-node-id` | network-topology.a-to-z.network-resource.tp-node-id |
 | 9 | `a-z-link-id` | network-topology.a-to-z.network-resource.link-id |
 | 10 | `a-z-link-network-id` | network-topology.a-to-z.network-resource.link-network-id |
-| 11 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 11 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.31 — `services_z_2_a_network_topology.csv`
 
 JSON: `Services.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `common-id` | common-id |
 | 2 | `service-name` | service-name |
@@ -1151,60 +1151,60 @@ JSON: `Services.json`
 | 8 | `z-a-tp-node-id` | network-topology.z-to-a.network-resource.tp-node-id |
 | 9 | `z-a-link-id` | network-topology.z-to-a.network-resource.link-id |
 | 10 | `z-a-link-network-id` | network-topology.z-to-a.network-resource.link-network-id |
-| 11 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 11 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
 ### 3.32 — `services_otn.csv`
 
 JSON: `Services.json`
 
-| # | עמודת CSV | מקור / כלל |
+| # | CSV column | Source / rule |
 |---|---|---|
 | 1 | `common_id` | common-id |
 | 2 | `service_name` | service-name |
 | 3 | `supporting_service_name` | supporting-service-name |
-| 4 | `etl_hash_id` | HASH של ערכי השדות בשלב החישוב |
+| 4 | `etl_hash_id` | HASH of the fields available at the calculation stage |
 
-## פערים בקוד שצריך להפריד מכללים עסקיים
+## Code-Level Gaps (Not Business Rules)
 
-אלה ממצאי קריאה סטטית; השפעתם על נתונים אמיתיים לא נבדקה בהרצה. לא בוצע שינוי בקוד.
+The following findings come from static code inspection. Their impact on actual data was not measured by running the ETL. No code was changed.
 
-| מקום | ממצא | משמעות |
+| Location | Finding | Impact |
 |---|---|---|
-| חילוץ קלט | כמה התאמות לשם כותבות לאותו קובץ | סיכון לדריסה במקום צירוף |
-| `devices_circuit_packs_cp_rdm.csv` | ה־View מייצר `Shelf`, הייצוא מבקש `shelf` | העמודה המבוקשת אינה קיימת ב־View |
-| `devices7_circuit_pack_xpdr.csv` | ה־View משמר `Shelf`, הייצוא מבקש `shelf`; המקור עצמו נקרא `circuit-packs.Shelf` | גם הבדל בשם הייצוא וגם נתיב מקור שכדאי לאמת |
-| `devices_port_parents_rdm.csv` | מקור `Shelf` נקרא באות גדולה, בניגוד למסלולים אחרים שקוראים `shelf` | ייתכן שדה חסר, תלוי בנתוני המקור |
-| `services_a_2_z_topology.csv` וגם `services_z_2_a_topology.csv` | נוצר `circuit_pack_name`, אבל ה־project הסופי שומר `circuit_pack_ame` | `circuit_pack_name` המבוקש בייצוא נשמט |
-| `networks_v7_openroadm_otn_topology.csv` | הייצוא מבקש `degree-number` ו־`node-ref`, שאינם ב־View הסופי | אי־התאמת schema |
-| ייצוא רשתות | שמות v7, מקור V13 | אין לפרש את גרסת הקלט משם הפלט |
-| ממשקים | העמודה נקראת `operationale-state` | זה האיות בפלט הקיים; המקור `operational-state` |
-| מסלולי שירות | `destination_tail_clf` | זה האיות בפלט הקיים, ללא i בסוף |
-| hash | ערכים מחוברים ללא מפריד, ובחלק מה־Views נכללים גם שדות שאינם מיוצאים | hash אינו מפתח ייחודי, ואינו בהכרח hash של עמודות CSV בלבד |
+| Input extraction | Multiple filename matches write to one intermediate file | Risk of overwrite rather than aggregation |
+| `devices_circuit_packs_cp_rdm.csv` | View produces `Shelf`, while export requests `shelf` | Requested column is absent from the view |
+| `devices7_circuit_pack_xpdr.csv` | View retains `Shelf` but export requests `shelf`; source uses `circuit-packs.Shelf` | Export-name mismatch and source path require validation |
+| `devices_port_parents_rdm.csv` | Source uses uppercase `Shelf`, unlike other paths using `shelf` | Possibly missing field depending on source data |
+| `services_a_2_z_topology.csv` and `services_z_2_a_topology.csv` | `circuit_pack_name` is computed, but final `$project` retains `circuit_pack_ame` | Export-requested `circuit_pack_name` is dropped |
+| `networks_v7_openroadm_otn_topology.csv` | Export requests `degree-number` and `node-ref`, neither present in final view | Schema mismatch |
+| Network exports | Output names say v7, sources are V13 | Do not infer the input version from the CSV filename |
+| Interfaces | Column is spelled `operationale-state` | This is the actual output spelling; source is `operational-state` |
+| Service paths | `destination_tail_clf` | Actual output spelling omits the trailing `i` |
+| Hash | Values are concatenated without separators; some views include non-exported fields | Not a unique key and not necessarily a hash of CSV columns alone |
 
-### עמודות חסרות שנמצאו במעקב אחר ה־project
+### Missing Columns Identified in the Projection Trace
 
-| CSV | עמודה | ממצא |
+| CSV | Column | Finding |
 |---|---|---|
-| devices7_circuit_pack_xpdr.csv | shelf | [חסר ב־View הסופי] |
-| devices_circuit_packs_cp_rdm.csv | shelf | [חסר ב־View הסופי] |
-| networks_v7_openroadm_otn_topology.csv | degree-number | [חסר ב־View הסופי] |
-| networks_v7_openroadm_otn_topology.csv | node-ref | [חסר ב־View הסופי] |
-| services_a_2_z_topology.csv | circuit_pack_name | [חסר ב־View הסופי] |
-| services_z_2_a_topology.csv | circuit_pack_name | [חסר ב־View הסופי] |
+| devices7_circuit_pack_xpdr.csv | shelf | [missing from final view] |
+| devices_circuit_packs_cp_rdm.csv | shelf | [missing from final view] |
+| networks_v7_openroadm_otn_topology.csv | degree-number | [missing from final view] |
+| networks_v7_openroadm_otn_topology.csv | node-ref | [missing from final view] |
+| services_a_2_z_topology.csv | circuit_pack_name | [missing from final view] |
+| services_z_2_a_topology.csv | circuit_pack_name | [missing from final view] |
 
-## מה כבר אומת בקלט ומה עדיין פתוח
+## Verified Input Facts and Remaining Questions
 
-הדוח המקומי מצא 310 מסמכי DevicesV2deployed, ‏17,882 מסמכי Tail, ‏2,095 מסמכי IOFL ו־4 רשומות network-list ב־NetworksV13. אלה ספירות קלט, לא פלט. במבנים פנימיים נדגם רק האיבר הראשון; פירוט חלק מהקבצים נחתך. אין מהדוח הוכחה שכל השדות קיימים בכל הרשומות או שכל קשר ניתן לפתרון.
+The local report found 310 DevicesV2deployed documents, 17,882 Tail documents, 2,095 IOFL documents, and four `network-list` entries in NetworksV13. These are **input counts**, not output counts. Only the first element of nested structures was sampled, and some file details were truncated. The report does not prove that every field is populated in every document or that all links can be resolved.
 
-אין עדיין ספירת CSV בפועל, בדיקת כפילויות, אימות טיפוסים לכל השדות או השוואת לפני/אחרי על רשומות אמיתיות. יש לאשר עם בעלי הנתונים שהשמטת קבצים/שדות ובחירת FIRST הן דרישות מכוונות.
+Actual CSV row counts, duplicate checks, field-type validation, and before/after comparisons against real records remain unverified. Data owners should confirm whether the omitted files/fields and FIRST-selection behavior are intentional requirements.
 
-## מקורות
+## Sources
 
-- [סדר הריצה, קלט ועמודות הייצוא](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/do-all.sh)
-- [עיבוד ציוד](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js)
-- [עיבוד כבלים](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/fiber_cables.js)
-- [עיבוד tails](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/fiber_tails.js)
-- [עיבוד IOFL](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/iofl.js)
-- [עיבוד רשתות](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/networks_v7.js)
-- [עיבוד שירותים](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js)
-- [דוח הארכיון המקומי](https://github.com/adarcook/etl-vnc/issues/2)
+- [Run sequence, input selection, and CSV export columns](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/do-all.sh)
+- [Device transformations](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/devices.js)
+- [Fiber cable transformations](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/fiber_cables.js)
+- [Fiber tail transformations](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/fiber_tails.js)
+- [IOFL transformations](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/iofl.js)
+- [Network transformations](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/networks_v7.js)
+- [Service transformations](https://github.com/adarcook/etl-vnc/blob/main/vnc-mongodb-chart/config/services.js)
+- [Local archive report](https://github.com/adarcook/etl-vnc/issues/2)
