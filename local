@@ -1,0 +1,145 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+ROOT=$(cd "$(dirname "$0")" && pwd -P)
+WORKSPACE="$ROOT/.local-vnc"
+CONTAINER=etl-vnc-local
+IMAGE=etl-vnc-local:7.0.16
+
+usage() {
+    printf '%s\n' \
+        'Usage: ./local {start|run ARCHIVE|logs|mongo|shell|stop|help}' \
+        'Each session permits one run. Stop and start for another run.' \
+        'Results and databases remain in .local-vnc/sessions/.'
+}
+
+fail() { printf 'Error: %s\n' "$1" >&2; exit 1; }
+
+check_docker() {
+    command -v docker >/dev/null 2>&1 || fail 'Docker is not installed.'
+    docker info >/dev/null 2>&1 || fail 'Docker is unavailable; start Docker Desktop.'
+}
+
+check_container() {
+    local mount
+    docker container inspect "$CONTAINER" >/dev/null 2>&1 || fail 'Environment is not started; run ./local start.'
+    SESSION=$(docker inspect -f '{{index .Config.Labels "com.etl-vnc.session"}}' "$CONTAINER")
+    case "$SESSION" in
+        "$WORKSPACE"/sessions/session.*) ;;
+        *) fail 'Container name is in use by an unrelated container.' ;;
+    esac
+    [[ "$SESSION" != *'/../'* && -d "$SESSION" ]] || fail 'Invalid container workspace.'
+    [[ $(docker inspect -f '{{.HostConfig.NetworkMode}}' "$CONTAINER") == none ]] || fail 'Container network isolation is not enabled.'
+    mount=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/source"}}{{.Source}}:{{.RW}}{{end}}{{end}}' "$CONTAINER")
+    [[ "$mount" == "$ROOT/vnc-mongodb-chart/config:false" ]] || fail 'Source mount is not read-only or does not match this repository.'
+    mount=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/work"}}{{.Source}}:{{.RW}}{{end}}{{end}}' "$CONTAINER")
+    [[ "$mount" == "$SESSION/work:true" ]] || fail 'Container workspace does not match.'
+    mount=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/db"}}{{.Source}}:{{.RW}}{{end}}{{end}}' "$CONTAINER")
+    [[ "$mount" == "$SESSION/db:true" ]] || fail 'Container database does not match.'
+}
+
+check_running() {
+    check_container
+    [[ $(docker inspect -f '{{.State.Running}}' "$CONTAINER") == true ]] || fail 'Container is stopped; run ./local start.'
+    [[ $(docker inspect -f '{{len .NetworkSettings.Networks}} {{if index .NetworkSettings.Networks "none"}}none{{end}}' "$CONTAINER") == '1 none' ]] || fail 'Container has unexpected network attachments.'
+}
+
+command=${1:-help}
+case "$command" in
+    help|-h|--help)
+        [[ $# -le 1 ]] || fail 'help takes no arguments.'
+        usage
+        ;;
+    start)
+        [[ $# -eq 1 ]] || fail 'start takes no arguments.'
+        check_docker
+        if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+            check_container
+            if [[ $(docker inspect -f '{{.State.Running}}' "$CONTAINER") != true ]]; then
+                docker start "$CONTAINER" >/dev/null
+            fi
+            check_running
+            printf 'Local environment is already started.\n'
+            exit 0
+        fi
+        if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+            docker build --platform linux/arm64 -t "$IMAGE" - < "$ROOT/Dockerfile.local"
+        fi
+        mkdir -p "$WORKSPACE/sessions"
+        SESSION=$(mktemp -d "$WORKSPACE/sessions/session.XXXXXXXX")
+        mkdir "$SESSION/work" "$SESSION/db"
+        docker run -d --name "$CONTAINER" --platform linux/arm64 --network none \
+            --label "com.etl-vnc.session=$SESSION" --entrypoint sleep \
+            -v "$ROOT/vnc-mongodb-chart/config:/source:ro" \
+            -v "$SESSION/work:/work" -v "$SESSION/db:/data/db" \
+            -w /work "$IMAGE" infinity >/dev/null
+        check_running
+        printf 'Local environment started. No archive has been processed.\n'
+        ;;
+    run)
+        [[ $# -eq 2 ]] || fail 'run requires exactly one archive path.'
+        [[ -f "$2" && -r "$2" ]] || fail 'Archive is missing or unreadable.'
+        check_docker
+        check_running
+        mkdir "$SESSION/started" 2>/dev/null || fail 'This session already has a run; use ./local stop and ./local start.'
+        cp "$2" "$SESSION/work/daily-api-get.tar.gz"
+        printf '%s\n' "$SESSION" > "$WORKSPACE/latest"
+        cp "$ROOT/vnc-mongodb-chart/config/"*.sh "$ROOT/vnc-mongodb-chart/config/"*.js "$SESSION/work/"
+        printf '%s\n' '#!/bin/bash' 'printf '\''LOCAL: upload skipped for %s\n'\'' "$1"' > "$SESSION/work/upload-csv.sh"
+        chmod +x "$SESSION/work/"*.sh
+        printf 'Running pipeline; progress is recorded in ./local logs.\n'
+        set +e
+        docker exec -e URL_CSV=local-disabled -e VNC_CSV_SAS=local-disabled "$CONTAINER" \
+            bash -c './do-all.sh --skip-env-check --skip-download' 2>&1 |
+            awk '
+                /=== PHASE [1-9]:/ { if (match($0, /PHASE [1-9]/)) print substr($0, RSTART, RLENGTH) " started" }
+                /VNC dump file is only .* aborting/ { print "Archive is below the pipeline minimum size" }
+                /Failed to extract VNC dump file/ { print "Archive extraction failed" }
+                /MongoDB failed to start/ { print "MongoDB failed to start" }
+                /MISSING FILE:/ { print "A required import file is missing" }
+                /INVALID JSON:/ { print "An import file contains invalid JSON" }
+                /IMPORT FAILED:/ { print "A MongoDB import failed" }
+                /Export failed for/ { print "A CSV export failed" }
+                /^(Imports|Exports|Uploads):[[:space:]]+[0-9]+ succeeded, [0-9]+ failed$/ { print }
+                /All operations completed successfully/ { print "Pipeline completed successfully" }
+            ' > "$SESSION/work/pipeline.log"
+        result=${PIPESTATUS[0]}
+        set -e
+        printf 'Pipeline exit status: %s\n' "$result" >> "$SESSION/work/pipeline.log"
+        printf 'Pipeline finished with status %s.\n' "$result"
+        exit "$result"
+        ;;
+    logs)
+        [[ $# -eq 1 ]] || fail 'logs takes no arguments.'
+        [[ -f "$WORKSPACE/latest" ]] || fail 'No pipeline log is available.'
+        IFS= read -r SESSION < "$WORKSPACE/latest"
+        case "$SESSION" in "$WORKSPACE"/sessions/session.*) ;; *) fail 'Invalid latest session.' ;; esac
+        [[ -f "$SESSION/work/pipeline.log" ]] || fail 'No pipeline log is available.'
+        cat "$SESSION/work/pipeline.log"
+        ;;
+    shell|mongo)
+        [[ $# -eq 1 ]] || fail "$command takes no arguments."
+        check_docker
+        check_running
+        if [[ "$command" == mongo ]]; then
+            docker exec "$CONTAINER" mongosh --quiet --eval 'db.adminCommand({ping: 1}).ok' >/dev/null 2>&1 || fail 'MongoDB is not ready; run the pipeline first.'
+            docker exec -it "$CONTAINER" mongosh dap
+        else
+            docker exec -it "$CONTAINER" bash
+        fi
+        ;;
+    stop)
+        [[ $# -eq 1 ]] || fail 'stop takes no arguments.'
+        check_docker
+        if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+            check_container
+            docker rm -f "$CONTAINER" >/dev/null
+        fi
+        printf 'Local environment stopped. Results remain in .local-vnc/sessions/.\n'
+        ;;
+    *)
+        usage >&2
+        fail 'Unknown command.'
+        ;;
+esac
